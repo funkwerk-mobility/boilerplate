@@ -1,7 +1,7 @@
 # boilerplate
 
-[![Build Status](https://travis-ci.org/funkwerk/boilerplate.svg?branch=master)](https://travis-ci.org/funkwerk/boilerplate)
-[![License](https://img.shields.io/badge/license-BSL_1.0-blue.svg)](https://raw.githubusercontent.com/funkwerk/boilerplate/master/LICENSE)
+[![Build Status](https://github.com/funkwerk-mobility/boilerplate/workflows/CI/badge.svg)](https://github.com/funkwerk-mobility/boilerplate/actions?query=workflow%3ACI)
+[![License](https://img.shields.io/badge/license-BSL_1.0-blue.svg)](https://raw.githubusercontent.com/funkwerk-mobility/boilerplate/master/LICENSE)
 [![Dub Version](https://img.shields.io/dub/v/boilerplate.svg)](https://code.dlang.org/packages/boilerplate)
 
 libboilerplate generates boilerplate code handling common tasks. Code generation is driven by user-defined attributes.
