@@ -907,8 +907,311 @@ mixin template GenerateToStringTemplate()
             enum userDefinedVoidToString = hasOwnVoidToString!(typeof(this));
         }
 
+        enum bool generateToStringFunction = !userDefinedStringToString && !userDefinedVoidToString;
+
+        static if (generateToStringFunction)
+        {
+            string toStringFunction = null;
+
+            bool nakedMode;
+            bool udaIncludeSuper;
+            bool udaExcludeSuper;
+
+            foreach (uda; __traits(getAttributes, typeof(this)))
+            {
+                static if (is(typeof(uda) == ToStringEnum))
+                {
+                    switch (uda)
+                    {
+                        case ToString.Naked: nakedMode = true; break;
+                        case ToString.IncludeSuper: udaIncludeSuper = true; break;
+                        case ToString.ExcludeSuper: udaExcludeSuper = true; break;
+                        default: break;
+                    }
+                }
+            }
+
+            string NamePlusOpenParen = typeName!(typeof(this)) ~ "(";
+
+            version(AutoStringDebug)
+            {
+                toStringFunction ~= format!`pragma(msg, "%s %s");`(alreadyHaveStringToString, alreadyHaveVoidToString);
+            }
+
+            static if (isObject
+                && is(typeof(typeof(super).init.toString((void delegate(const(char)[])).init)) == void))
+            {
+                toStringFunction ~= `override `;
+            }
+
+            toStringFunction ~= `public void toString(scope void delegate(const(char)[]) sink) const {`
+                ~ `import boilerplate.autostring: ToStringHandler;`
+                ~ `import boilerplate.util: sinkWrite;`
+                ~ `import std.traits: getUDAs;`;
+
+            static if (synchronize)
+            {
+                toStringFunction ~= `synchronized (this) { `;
+            }
+
+            if (!nakedMode)
+            {
+                toStringFunction ~= format!`sink(%(%s%));`([NamePlusOpenParen]);
+            }
+
+            bool includeSuper = false;
+
+            static if (isObject)
+            {
+                if (alreadyHaveUsableStringToString || alreadyHaveUsableVoidToString)
+                {
+                    includeSuper = true;
+                }
+            }
+
+            if (udaIncludeSuper)
+            {
+                includeSuper = true;
+            }
+            else if (udaExcludeSuper)
+            {
+                includeSuper = false;
+            }
+
+            static if (isObject)
+            {
+                if (includeSuper)
+                {
+                    static if (!alreadyHaveUsableStringToString && !alreadyHaveUsableVoidToString)
+                    {
+                        return `static assert(false, `
+                            ~ `"cannot include super class in GenerateToString: `
+                            ~ `parent class has no usable toString!");`;
+                    }
+                    else {
+                        static if (alreadyHaveUsableVoidToString)
+                        {
+                            toStringFunction ~= `super.toString(sink);`;
+                        }
+                        else
+                        {
+                            toStringFunction ~= `sink(super.toString());`;
+                        }
+                        toStringFunction ~= `bool comma = true;`;
+                    }
+                }
+                else
+                {
+                    toStringFunction ~= `bool comma = false;`;
+                }
+            }
+            else
+            {
+                toStringFunction ~= `bool comma = false;`;
+            }
+
+            toStringFunction ~= `{`;
+
+            mixin GenNormalMemberTuple!(true);
+
+            foreach (member; NormalMemberTuple)
+            {
+                mixin("alias symbol = typeof(this)." ~ member ~ ";");
+
+                enum udaInclude = udaIndex!(ToString.Include, __traits(getAttributes, symbol)) != -1;
+                enum udaExclude = udaIndex!(ToString.Exclude, __traits(getAttributes, symbol)) != -1;
+                enum udaLabeled = udaIndex!(ToString.Labeled, __traits(getAttributes, symbol)) != -1;
+                enum udaUnlabeled = udaIndex!(ToString.Unlabeled, __traits(getAttributes, symbol)) != -1;
+                enum udaOptional = udaIndex!(ToString.Optional, __traits(getAttributes, symbol)) != -1;
+                enum udaToStringHandler = udaIndex!(ToStringHandler, __traits(getAttributes, symbol)) != -1;
+                enum udaNonEmpty = udaIndex!(NonEmpty, __traits(getAttributes, symbol)) != -1;
+
+                // see std.traits.isFunction!()
+                static if (
+                    is(symbol == function)
+                    || is(typeof(symbol) == function)
+                    || (is(typeof(&symbol) U : U*) && is(U == function)))
+                {
+                    enum isFunction = true;
+                }
+                else
+                {
+                    enum isFunction = false;
+                }
+
+                enum includeOverride = udaInclude || udaOptional;
+
+                enum includeMember = (!isFunction || includeOverride) && !udaExclude;
+
+                static if (includeMember)
+                {
+                    string memberName = member;
+
+                    if (memberName.endsWith("_"))
+                    {
+                        memberName = memberName[0 .. $ - 1];
+                    }
+
+                    bool labeled = true;
+
+                    static if (udaUnlabeled)
+                    {
+                        labeled = false;
+                    }
+
+                    if (isMemberUnlabeledByDefault!(Unqual!(typeof(symbol)))(memberName, udaNonEmpty))
+                    {
+                        labeled = false;
+                    }
+
+                    static if (udaLabeled)
+                    {
+                        labeled = true;
+                    }
+
+                    string membervalue = `this.` ~ member;
+
+                    bool escapeStrings = true;
+
+                    static if (udaToStringHandler)
+                    {
+                        alias Handlers = getUDAs!(symbol, ToStringHandler);
+
+                        static assert(Handlers.length == 1);
+
+                        static if (__traits(compiles, Handlers[0].Handler(typeof(symbol).init)))
+                        {
+                            membervalue = `getUDAs!(this.` ~ member ~ `, ToStringHandler)[0].Handler(`
+                                ~ membervalue
+                                ~ `)`;
+
+                            escapeStrings = false;
+                        }
+                        else
+                        {
+                            return `static assert(false, "cannot determine how to call ToStringHandler");`;
+                        }
+                    }
+
+                    string readMemberValue = membervalue;
+                    string conditionalWritestmt; // formatted with sink.sinkWrite(... readMemberValue ... )
+
+                    static if (udaOptional)
+                    {
+                        import std.array : empty;
+
+                        enum optionalIndex = udaIndex!(ToString.Optional, __traits(getAttributes, symbol));
+                        alias optionalUda = Alias!(__traits(getAttributes, symbol)[optionalIndex]);
+
+                        static if (is(optionalUda == struct))
+                        {
+                            alias pred = Alias!(__traits(getAttributes, symbol)[optionalIndex]).condition;
+                            static if (__traits(compiles, pred(typeof(this).init)))
+                            {
+                                conditionalWritestmt = format!q{
+                                    if (__traits(getAttributes, %s)[%s].condition(this)) { %%s }
+                                } (membervalue, optionalIndex);
+                            }
+                            else
+                            {
+                                conditionalWritestmt = format!q{
+                                    if (__traits(getAttributes, %s)[%s].condition(%s)) { %%s }
+                                } (membervalue, optionalIndex, membervalue);
+                            }
+                        }
+                        else static if (__traits(compiles, typeof(symbol).init.isNull))
+                        {
+                            conditionalWritestmt = format!q{if (!%s.isNull) { %%s }}
+                                (membervalue);
+
+                            static if (is(typeof(symbol) : Nullable!T, T))
+                            {
+                                readMemberValue = membervalue ~ ".get";
+                            }
+                        }
+                        else static if (__traits(compiles, typeof(symbol).init.empty))
+                        {
+                            conditionalWritestmt = format!q{import std.array : empty; if (!%s.empty) { %%s }}
+                                (membervalue);
+                        }
+                        else static if (__traits(compiles, typeof(symbol).init !is null))
+                        {
+                            conditionalWritestmt = format!q{if (%s !is null) { %%s }}
+                                (membervalue);
+                        }
+                        else static if (__traits(compiles, typeof(symbol).init != 0))
+                        {
+                            conditionalWritestmt = format!q{if (%s != 0) { %%s }}
+                                (membervalue);
+                        }
+                        else static if (__traits(compiles, { if (typeof(symbol).init) { } }))
+                        {
+                            conditionalWritestmt = format!q{if (%s) { %%s }}
+                                (membervalue);
+                        }
+                        else
+                        {
+                            return format!(`static assert(false, `
+                                    ~ `"don't know how to figure out whether %s is present.");`)
+                                (member);
+                        }
+                    }
+                    else
+                    {
+                        // Nullables (without handler, that aren't force-included) fall back to optional
+                        static if (!udaToStringHandler && !udaInclude &&
+                            __traits(compiles, typeof(symbol).init.isNull))
+                        {
+                            conditionalWritestmt = format!q{if (!%s.isNull) { %%s }}
+                                (membervalue);
+
+                            static if (is(typeof(symbol) : Nullable!T, T))
+                            {
+                                readMemberValue = membervalue ~ ".get";
+                            }
+                        }
+                        else
+                        {
+                            conditionalWritestmt = q{ %s };
+                        }
+                    }
+
+                    string writestmt;
+
+                    if (labeled)
+                    {
+                        writestmt = format!`sink.sinkWrite(comma, %s, "%s=%%s", %s);`
+                            (escapeStrings, memberName, readMemberValue);
+                    }
+                    else
+                    {
+                        writestmt = format!`sink.sinkWrite(comma, %s, "%%s", %s);`
+                            (escapeStrings, readMemberValue);
+                    }
+
+                    toStringFunction ~= format(conditionalWritestmt, writestmt);
+                }
+            }
+
+            toStringFunction ~= `} `;
+
+            if (!nakedMode)
+            {
+                toStringFunction ~= `sink(")");`;
+            }
+
+            static if (synchronize)
+            {
+                toStringFunction ~= `} `;
+            }
+
+            toStringFunction ~= `} `;
+        }
+
         static if (userDefinedStringToString && userDefinedVoidToString)
         {
+            static assert(!generateToStringFunction);
+
             string result = ``; // Nothing to be done.
         }
         // if the user has defined their own string toString() in this aggregate:
@@ -939,299 +1242,9 @@ mixin template GenerateToStringTemplate()
 
             static if (!userDefinedVoidToString)
             {
-                bool nakedMode;
-                bool udaIncludeSuper;
-                bool udaExcludeSuper;
+                static assert(generateToStringFunction);
 
-                foreach (uda; __traits(getAttributes, typeof(this)))
-                {
-                    static if (is(typeof(uda) == ToStringEnum))
-                    {
-                        switch (uda)
-                        {
-                            case ToString.Naked: nakedMode = true; break;
-                            case ToString.IncludeSuper: udaIncludeSuper = true; break;
-                            case ToString.ExcludeSuper: udaExcludeSuper = true; break;
-                            default: break;
-                        }
-                    }
-                }
-
-                string NamePlusOpenParen = typeName!(typeof(this)) ~ "(";
-
-                version(AutoStringDebug)
-                {
-                    result ~= format!`pragma(msg, "%s %s");`(alreadyHaveStringToString, alreadyHaveVoidToString);
-                }
-
-                static if (isObject
-                    && is(typeof(typeof(super).init.toString((void delegate(const(char)[])).init)) == void))
-                {
-                    result ~= `override `;
-                }
-
-                result ~= `public void toString(scope void delegate(const(char)[]) sink) const {`
-                    ~ `import boilerplate.autostring: ToStringHandler;`
-                    ~ `import boilerplate.util: sinkWrite;`
-                    ~ `import std.traits: getUDAs;`;
-
-                static if (synchronize)
-                {
-                    result ~= `synchronized (this) { `;
-                }
-
-                if (!nakedMode)
-                {
-                    result ~= format!`sink(%(%s%));`([NamePlusOpenParen]);
-                }
-
-                bool includeSuper = false;
-
-                static if (isObject)
-                {
-                    if (alreadyHaveUsableStringToString || alreadyHaveUsableVoidToString)
-                    {
-                        includeSuper = true;
-                    }
-                }
-
-                if (udaIncludeSuper)
-                {
-                    includeSuper = true;
-                }
-                else if (udaExcludeSuper)
-                {
-                    includeSuper = false;
-                }
-
-                static if (isObject)
-                {
-                    if (includeSuper)
-                    {
-                        static if (!alreadyHaveUsableStringToString && !alreadyHaveUsableVoidToString)
-                        {
-                            return `static assert(false, `
-                                ~ `"cannot include super class in GenerateToString: `
-                                ~ `parent class has no usable toString!");`;
-                        }
-                        else {
-                            static if (alreadyHaveUsableVoidToString)
-                            {
-                                result ~= `super.toString(sink);`;
-                            }
-                            else
-                            {
-                                result ~= `sink(super.toString());`;
-                            }
-                            result ~= `bool comma = true;`;
-                        }
-                    }
-                    else
-                    {
-                        result ~= `bool comma = false;`;
-                    }
-                }
-                else
-                {
-                    result ~= `bool comma = false;`;
-                }
-
-                result ~= `{`;
-
-                mixin GenNormalMemberTuple!(true);
-
-                foreach (member; NormalMemberTuple)
-                {
-                    mixin("alias symbol = typeof(this)." ~ member ~ ";");
-
-                    enum udaInclude = udaIndex!(ToString.Include, __traits(getAttributes, symbol)) != -1;
-                    enum udaExclude = udaIndex!(ToString.Exclude, __traits(getAttributes, symbol)) != -1;
-                    enum udaLabeled = udaIndex!(ToString.Labeled, __traits(getAttributes, symbol)) != -1;
-                    enum udaUnlabeled = udaIndex!(ToString.Unlabeled, __traits(getAttributes, symbol)) != -1;
-                    enum udaOptional = udaIndex!(ToString.Optional, __traits(getAttributes, symbol)) != -1;
-                    enum udaToStringHandler = udaIndex!(ToStringHandler, __traits(getAttributes, symbol)) != -1;
-                    enum udaNonEmpty = udaIndex!(NonEmpty, __traits(getAttributes, symbol)) != -1;
-
-                    // see std.traits.isFunction!()
-                    static if (
-                        is(symbol == function)
-                        || is(typeof(symbol) == function)
-                        || (is(typeof(&symbol) U : U*) && is(U == function)))
-                    {
-                        enum isFunction = true;
-                    }
-                    else
-                    {
-                        enum isFunction = false;
-                    }
-
-                    enum includeOverride = udaInclude || udaOptional;
-
-                    enum includeMember = (!isFunction || includeOverride) && !udaExclude;
-
-                    static if (includeMember)
-                    {
-                        string memberName = member;
-
-                        if (memberName.endsWith("_"))
-                        {
-                            memberName = memberName[0 .. $ - 1];
-                        }
-
-                        bool labeled = true;
-
-                        static if (udaUnlabeled)
-                        {
-                            labeled = false;
-                        }
-
-                        if (isMemberUnlabeledByDefault!(Unqual!(typeof(symbol)))(memberName, udaNonEmpty))
-                        {
-                            labeled = false;
-                        }
-
-                        static if (udaLabeled)
-                        {
-                            labeled = true;
-                        }
-
-                        string membervalue = `this.` ~ member;
-
-                        bool escapeStrings = true;
-
-                        static if (udaToStringHandler)
-                        {
-                            alias Handlers = getUDAs!(symbol, ToStringHandler);
-
-                            static assert(Handlers.length == 1);
-
-                            static if (__traits(compiles, Handlers[0].Handler(typeof(symbol).init)))
-                            {
-                                membervalue = `getUDAs!(this.` ~ member ~ `, ToStringHandler)[0].Handler(`
-                                    ~ membervalue
-                                    ~ `)`;
-
-                                escapeStrings = false;
-                            }
-                            else
-                            {
-                                return `static assert(false, "cannot determine how to call ToStringHandler");`;
-                            }
-                        }
-
-                        string readMemberValue = membervalue;
-                        string conditionalWritestmt; // formatted with sink.sinkWrite(... readMemberValue ... )
-
-                        static if (udaOptional)
-                        {
-                            import std.array : empty;
-
-                            enum optionalIndex = udaIndex!(ToString.Optional, __traits(getAttributes, symbol));
-                            alias optionalUda = Alias!(__traits(getAttributes, symbol)[optionalIndex]);
-
-                            static if (is(optionalUda == struct))
-                            {
-                                alias pred = Alias!(__traits(getAttributes, symbol)[optionalIndex]).condition;
-                                static if (__traits(compiles, pred(typeof(this).init)))
-                                {
-                                    conditionalWritestmt = format!q{
-                                        if (__traits(getAttributes, %s)[%s].condition(this)) { %%s }
-                                    } (membervalue, optionalIndex);
-                                }
-                                else
-                                {
-                                    conditionalWritestmt = format!q{
-                                        if (__traits(getAttributes, %s)[%s].condition(%s)) { %%s }
-                                    } (membervalue, optionalIndex, membervalue);
-                                }
-                            }
-                            else static if (__traits(compiles, typeof(symbol).init.isNull))
-                            {
-                                conditionalWritestmt = format!q{if (!%s.isNull) { %%s }}
-                                    (membervalue);
-
-                                static if (is(typeof(symbol) : Nullable!T, T))
-                                {
-                                    readMemberValue = membervalue ~ ".get";
-                                }
-                            }
-                            else static if (__traits(compiles, typeof(symbol).init.empty))
-                            {
-                                conditionalWritestmt = format!q{import std.array : empty; if (!%s.empty) { %%s }}
-                                    (membervalue);
-                            }
-                            else static if (__traits(compiles, typeof(symbol).init !is null))
-                            {
-                                conditionalWritestmt = format!q{if (%s !is null) { %%s }}
-                                    (membervalue);
-                            }
-                            else static if (__traits(compiles, typeof(symbol).init != 0))
-                            {
-                                conditionalWritestmt = format!q{if (%s != 0) { %%s }}
-                                    (membervalue);
-                            }
-                            else static if (__traits(compiles, { if (typeof(symbol).init) { } }))
-                            {
-                                conditionalWritestmt = format!q{if (%s) { %%s }}
-                                    (membervalue);
-                            }
-                            else
-                            {
-                                return format!(`static assert(false, `
-                                        ~ `"don't know how to figure out whether %s is present.");`)
-                                    (member);
-                            }
-                        }
-                        else
-                        {
-                            // Nullables (without handler, that aren't force-included) fall back to optional
-                            static if (!udaToStringHandler && !udaInclude &&
-                                __traits(compiles, typeof(symbol).init.isNull))
-                            {
-                                conditionalWritestmt = format!q{if (!%s.isNull) { %%s }}
-                                    (membervalue);
-
-                                static if (is(typeof(symbol) : Nullable!T, T))
-                                {
-                                    readMemberValue = membervalue ~ ".get";
-                                }
-                            }
-                            else
-                            {
-                                conditionalWritestmt = q{ %s };
-                            }
-                        }
-
-                        string writestmt;
-
-                        if (labeled)
-                        {
-                            writestmt = format!`sink.sinkWrite(comma, %s, "%s=%%s", %s);`
-                                (escapeStrings, memberName, readMemberValue);
-                        }
-                        else
-                        {
-                            writestmt = format!`sink.sinkWrite(comma, %s, "%%s", %s);`
-                                (escapeStrings, readMemberValue);
-                        }
-
-                        result ~= format(conditionalWritestmt, writestmt);
-                    }
-                }
-
-                result ~= `} `;
-
-                if (!nakedMode)
-                {
-                    result ~= `sink(")");`;
-                }
-
-                static if (synchronize)
-                {
-                    result ~= `} `;
-                }
-
-                result ~= `} `;
+                result = toStringFunction;
             }
 
             // generate fallback string toString()
