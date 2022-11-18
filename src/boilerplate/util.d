@@ -2,6 +2,7 @@ module boilerplate.util;
 
 import std.algorithm : map, sort;
 import std.format;
+import std.json;
 import std.meta;
 import std.range : array, iota;
 import std.string : join;
@@ -331,6 +332,44 @@ void sinkWrite(T...)(scope void delegate(const(char)[]) sink, ref bool comma, bo
         comma = true;
 
         mixin(`sink.formattedWrite(fmt, ` ~ replaceArgHelper!(T.length) ~ `);`);
+    }
+}
+
+JSONValue toJsonValue(T)(T value)
+{
+    import std.algorithm : map;
+    import std.array : array;
+    import std.datetime : SysTime;
+    import std.sumtype : match, SumType;
+
+    static if (is(T : long) || is(T : double) || is(T : string))
+    {
+        return JSONValue(value);
+    }
+    else static if (__traits(hasMember, T, "toISOExtString"))
+    {
+        return JSONValue(value.toISOExtString);
+    }
+    else static if (is(T : JSONValue))
+    {
+        return value;
+    }
+    else static if (__traits(hasMember, T, "toJson"))
+    {
+        return value.toJson;
+    }
+    else static if (is(T : U[], U))
+    {
+        return JSONValue(value.map!toJsonValue.array);
+    }
+    else static if (is(T : SumType!U, U...))
+    {
+        return value.match!(staticMap!(toJsonValue, U));
+    }
+    else
+    {
+        // static assert(false, "???" ~ T.stringof);
+        return JSONValue("unknown type " ~ T.stringof);
     }
 }
 

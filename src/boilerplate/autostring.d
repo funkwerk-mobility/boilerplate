@@ -1,6 +1,7 @@
 module boilerplate.autostring;
 
 import std.format : format;
+import std.json;
 import std.meta : Alias;
 import std.traits : Unqual;
 
@@ -17,6 +18,7 @@ both sink-based and classic, customizable with UDA annotations on classes, membe
 +/
 public enum string GenerateToString = `
     import boilerplate.autostring : GenerateToStringTemplate;
+    static import std.json;
     mixin GenerateToStringTemplate;
     mixin(typeof(this).generateToStringErrCheck());
     mixin(typeof(this).generateToStringImpl());
@@ -35,6 +37,7 @@ unittest
 
     (new Class).to!string.shouldEqual("Class()");
     (new Class).toString.shouldEqual("Class()");
+    (new Class).toJson.shouldEqual(`{}`.parseJSON);
 }
 
 /++
@@ -50,6 +53,7 @@ unittest
     }
 
     Struct.init.to!string.shouldEqual("Struct(a=0)");
+    Struct.init.toJson.shouldEqual(`{"a": 0}`.parseJSON);
 }
 
 /++
@@ -66,6 +70,7 @@ unittest
     }
 
     Struct.init.to!string.shouldEqual("Struct()");
+    Struct.init.toJson.shouldEqual(`{}`.parseJSON);
 }
 
 /++
@@ -107,7 +112,10 @@ unittest
     Struct.init.to!string.shouldEqual("Struct()");
     Struct(2, "hi", new Class, Test().nullable).to!string
         .shouldEqual(`Struct(a=2, s="hi", obj=Class(), nullable=Test())`);
+    Struct(2, "hi", new Class, Test().nullable).toJson
+        .shouldEqual(`{"a": 2, "s": "hi", "obj": {}, "nullable": {}}`.parseJSON);
     Struct(0, "", null, Nullable!Test()).to!string.shouldEqual("Struct()");
+    Struct(0, "", null, Nullable!Test()).toJson.shouldEqual(`{}`.parseJSON);
 }
 
 /++
@@ -126,8 +134,11 @@ unittest
     }
 
     Struct.init.to!string.shouldEqual("Struct()");
+    Struct.init.toJson.shouldEqual(`{}`.parseJSON);
     Struct(3).to!string.shouldEqual("Struct()");
+    Struct(3).toJson.shouldEqual(`{}`.parseJSON);
     Struct(5).to!string.shouldEqual("Struct(i=5)");
+    Struct(5).toJson.shouldEqual(`{"i": 5}`.parseJSON);
 }
 
 /++
@@ -149,7 +160,9 @@ unittest
     }
 
     Struct(5, false).to!string.shouldEqual("Struct()");
+    Struct(5, false).toJson.shouldEqual(`{}`.parseJSON);
     Struct(5, true).to!string.shouldEqual("Struct(i=5)");
+    Struct(5, true).toJson.shouldEqual(`{"i": 5}`.parseJSON);
 }
 
 /++
@@ -212,6 +225,22 @@ unittest
     class ChildClass : ParentClass { mixin(GenerateToString); }
 
     (new ChildClass).to!string.shouldEqual("ChildClass(Some string)");
+}
+
+@("invokes manually implemented parent toJson")
+unittest
+{
+    class ParentClass
+    {
+        JSONValue toJson() const
+        {
+            return JSONValue("test");
+        }
+    }
+
+    class ChildClass : ParentClass { mixin(GenerateToString); }
+
+    (new ChildClass).toJson.shouldEqual(`"test"`.parseJSON);
 }
 
 @("can partially override toString in child class")
@@ -872,6 +901,7 @@ mixin template GenerateToStringTemplate()
             hasOwnStringToString, hasOwnVoidToString, isMemberUnlabeledByDefault, ToString, typeName;
         import boilerplate.conditions : NonEmpty;
         import boilerplate.util : GenNormalMemberTuple, udaIndex;
+        import std.json : JSONValue;
         import std.meta : Alias;
         import std.string : endsWith, format, split, startsWith, strip;
         import std.traits : BaseClassesTuple, getUDAs, Unqual;
@@ -900,18 +930,22 @@ mixin template GenerateToStringTemplate()
         {
             enum userDefinedStringToString = hasOwnStringToString!(typeof(this), typeof(super));
             enum userDefinedVoidToString = hasOwnVoidToString!(typeof(this), typeof(super));
+            enum userDefinedToJson = hasOwnToJson!(typeof(this), typeof(super));
         }
         else
         {
             enum userDefinedStringToString = hasOwnStringToString!(typeof(this));
             enum userDefinedVoidToString = hasOwnVoidToString!(typeof(this));
+            enum userDefinedToJson = hasOwnToJson!(typeof(this));
         }
 
         enum bool generateToStringFunction = !userDefinedStringToString && !userDefinedVoidToString;
+        enum bool generateToJsonFunction = !userDefinedToJson;
 
-        static if (generateToStringFunction)
+        static if (generateToStringFunction || generateToJsonFunction)
         {
             string toStringFunction = null;
+            string toJsonFunction = null;
 
             bool nakedMode;
             bool udaIncludeSuper;
@@ -943,15 +977,23 @@ mixin template GenerateToStringTemplate()
             {
                 toStringFunction ~= `override `;
             }
+            static if (isObject && is(typeof(super.toJson()) == JSONValue))
+            {
+                toJsonFunction ~= `override `;
+            }
 
             toStringFunction ~= `public void toString(scope void delegate(const(char)[]) sink) const {`
                 ~ `import boilerplate.autostring: ToStringHandler;`
                 ~ `import boilerplate.util: sinkWrite;`
                 ~ `import std.traits: getUDAs;`;
+            toJsonFunction ~= `public std.json.JSONValue toJson() const {`
+                ~ `import boilerplate.util: toJsonValue;`
+                ~ `import std.json: JSONValue;`;
 
             static if (synchronize)
             {
                 toStringFunction ~= `synchronized (this) { `;
+                toJsonFunction ~= `synchronized (this) { `;
             }
 
             if (!nakedMode)
@@ -959,28 +1001,35 @@ mixin template GenerateToStringTemplate()
                 toStringFunction ~= format!`sink(%(%s%));`([NamePlusOpenParen]);
             }
 
-            bool includeSuper = false;
+            bool includeSuperToString = false;
+            bool includeSuperToJson = false;
 
             static if (isObject)
             {
                 if (alreadyHaveUsableStringToString || alreadyHaveUsableVoidToString)
                 {
-                    includeSuper = true;
+                    includeSuperToString = true;
+                }
+                if (__traits(hasMember, typeof(super), "toJson"))
+                {
+                    includeSuperToJson = true;
                 }
             }
 
             if (udaIncludeSuper)
             {
-                includeSuper = true;
+                includeSuperToString = true;
+                includeSuperToJson = true;
             }
             else if (udaExcludeSuper)
             {
-                includeSuper = false;
+                includeSuperToString = false;
+                includeSuperToJson = false;
             }
 
             static if (isObject)
             {
-                if (includeSuper)
+                if (includeSuperToString)
                 {
                     static if (!alreadyHaveUsableStringToString && !alreadyHaveUsableVoidToString)
                     {
@@ -1004,10 +1053,19 @@ mixin template GenerateToStringTemplate()
                 {
                     toStringFunction ~= `bool comma = false;`;
                 }
+                if (includeSuperToJson)
+                {
+                    toJsonFunction ~= `JSONValue result = super.toJson;`;
+                }
+                else
+                {
+                    toJsonFunction ~= `JSONValue result = JSONValue((JSONValue[string]).init);`;
+                }
             }
             else
             {
                 toStringFunction ~= `bool comma = false;`;
+                toJsonFunction ~= `JSONValue result = JSONValue((JSONValue[string]).init);`;
             }
 
             toStringFunction ~= `{`;
@@ -1094,6 +1152,7 @@ mixin template GenerateToStringTemplate()
                     }
 
                     string readMemberValue = membervalue;
+                    string jsonMemberValue = `this.` ~ member;
                     string conditionalWritestmt; // formatted with sink.sinkWrite(... readMemberValue ... )
 
                     static if (udaOptional)
@@ -1126,7 +1185,8 @@ mixin template GenerateToStringTemplate()
 
                             static if (is(typeof(symbol) : Nullable!T, T))
                             {
-                                readMemberValue = membervalue ~ ".get";
+                                readMemberValue = membervalue ~ `.get`;
+                                jsonMemberValue = `this.` ~ member ~ `.get`;
                             }
                         }
                         else static if (__traits(compiles, typeof(symbol).init.empty))
@@ -1167,7 +1227,8 @@ mixin template GenerateToStringTemplate()
 
                             static if (is(typeof(symbol) : Nullable!T, T))
                             {
-                                readMemberValue = membervalue ~ ".get";
+                                readMemberValue = membervalue ~ `.get`;
+                                jsonMemberValue = `this.` ~ member ~ `.get`;
                             }
                         }
                         else
@@ -1176,20 +1237,23 @@ mixin template GenerateToStringTemplate()
                         }
                     }
 
-                    string writestmt;
+                    string writeStmt;
 
                     if (labeled)
                     {
-                        writestmt = format!`sink.sinkWrite(comma, %s, "%s=%%s", %s);`
+                        writeStmt = format!`sink.sinkWrite(comma, %s, "%s=%%s", %s);`
                             (escapeStrings, memberName, readMemberValue);
                     }
                     else
                     {
-                        writestmt = format!`sink.sinkWrite(comma, %s, "%%s", %s);`
+                        writeStmt = format!`sink.sinkWrite(comma, %s, "%%s", %s);`
                             (escapeStrings, readMemberValue);
                     }
+                    string writeJsonStmt = format!`result["%s"] = toJsonValue(%s);`
+                        (memberName, jsonMemberValue);
 
-                    toStringFunction ~= format(conditionalWritestmt, writestmt);
+                    toStringFunction ~= format(conditionalWritestmt, writeStmt);
+                    toJsonFunction ~= format(conditionalWritestmt, writeJsonStmt);
                 }
             }
 
@@ -1203,48 +1267,58 @@ mixin template GenerateToStringTemplate()
             static if (synchronize)
             {
                 toStringFunction ~= `} `;
+                toJsonFunction ~= `} `;
             }
 
             toStringFunction ~= `} `;
+            toJsonFunction ~= `return result;`
+                ~ `} `;
         }
 
         static if (userDefinedStringToString && userDefinedVoidToString)
         {
             static assert(!generateToStringFunction);
 
-            string result = ``; // Nothing to be done.
+            string toStringCode = ``; // Nothing to be done.
         }
         // if the user has defined their own string toString() in this aggregate:
         else static if (userDefinedStringToString)
         {
+            static assert(!generateToStringFunction);
+
             // just call it.
             static if (alreadyHaveUsableStringToString)
             {
-                string result = `public void toString(scope void delegate(const(char)[]) sink) const {` ~
+                string toStringCode = `public void toString(scope void delegate(const(char)[]) sink) const {` ~
                     ` sink(this.toString());` ~
                     ` }`;
 
                 static if (isObject
                     && is(typeof(typeof(super).init.toString((void delegate(const(char)[])).init)) == void))
                 {
-                    result = `override ` ~ result;
+                    toStringCode = `override ` ~ toStringCode;
                 }
             }
             else
             {
-                string result = `static assert(false, "toString is not const in this class.");`;
+                string toStringCode = `static assert(false, "toString is not const in this class.");`;
             }
         }
         // if the user has defined their own void toString() in this aggregate:
         else
         {
-            string result = null;
+
+            string toStringCode;
 
             static if (!userDefinedVoidToString)
             {
                 static assert(generateToStringFunction);
 
-                result = toStringFunction;
+                toStringCode = toStringFunction;
+            }
+            else
+            {
+                static assert(!generateToStringFunction);
             }
 
             // generate fallback string toString()
@@ -1252,16 +1326,24 @@ mixin template GenerateToStringTemplate()
             // (this is important to break cycles when a subclass implements a toString that calls super.toString)
             static if (isObject)
             {
-                result ~= `override `;
+                toStringCode ~= `override `;
             }
 
-            result ~= `public string toString() const {`
+            toStringCode ~= `public string toString() const {`
                 ~ `string result;`
                 ~ `typeof(this).toString((const(char)[] part) { result ~= part; });`
                 ~ `return result;`
             ~ `}`;
         }
-        return result;
+        static if (userDefinedToJson)
+        {
+            string toJsonCode = ``;
+        }
+        else
+        {
+            string toJsonCode = toJsonFunction;
+        }
+        return toStringCode ~ toJsonCode;
     }
 }
 
@@ -1485,17 +1567,25 @@ unittest
     "Hello".stringEndsWith("lo").shouldEqual("Hel");
 }
 
-template hasOwnFunction(Aggregate, Super, string Name, Type)
+template hasOwnFunction(Aggregate, Super, string name, Ret)
+if (!__traits(hasMember, Aggregate, name))
+{
+    enum hasOwnFunction = false;
+}
+
+template hasOwnFunction(Aggregate, Super, string name, Ret)
+if (__traits(hasMember, Aggregate, name))
 {
     import std.meta : AliasSeq, Filter;
-    import std.traits : Unqual;
-    enum FunctionMatchesType(alias Fun) = is(Unqual!(typeof(Fun)) == Type);
+    import std.traits : ReturnType, Unqual;
 
-    alias MyFunctions = AliasSeq!(__traits(getOverloads, Aggregate, Name));
+    enum FunctionMatchesType(alias Fun) = is(Unqual!(ReturnType!Fun) == Ret);
+
+    alias MyFunctions = AliasSeq!(__traits(getOverloads, Aggregate, name));
     alias MatchingFunctions = Filter!(FunctionMatchesType, MyFunctions);
     enum hasFunction = MatchingFunctions.length == 1;
 
-    alias SuperFunctions = AliasSeq!(__traits(getOverloads, Super, Name));
+    alias SuperFunctions = AliasSeq!(__traits(getOverloads, Super, name));
     alias SuperMatchingFunctions = Filter!(FunctionMatchesType, SuperFunctions);
     enum superHasFunction = SuperMatchingFunctions.length == 1;
 
@@ -1543,54 +1633,29 @@ public template typeName(T)
     }
 }
 
-public template hasOwnStringToString(Aggregate, Super)
+public alias hasOwnStringToString(T...) = hasOwn!(T, "toString", string);
+public alias hasOwnVoidToString(T...) = hasOwn!(T, "toString", void);
+public alias hasOwnToJson(T...) = hasOwn!(T, "toJson", JSONValue);
+
+private template hasOwn(Aggregate, Super, string name, Ret)
 if (is(Aggregate: Object))
 {
-    enum hasOwnStringToString = hasOwnFunction!(Aggregate, Super, "toString", typeof(StringToStringSample.toString));
+    enum hasOwn = hasOwnFunction!(Aggregate, Super, name, Ret);
 }
 
-public template hasOwnStringToString(Aggregate)
+private template hasOwn(Aggregate, string name, Ret)
 if (is(Aggregate == struct))
 {
-    static if (is(typeof(Aggregate.init.toString()) == string))
+    import std.traits : ReturnType;
+
+    static if (is(ReturnType!(__traits(getMember, Aggregate.init, name)) == Ret))
     {
-        enum hasOwnStringToString = !isFromAliasThis!(
-            Aggregate, "toString", typeof(StringToStringSample.toString));
+        enum hasOwn = !isFromAliasThis!(Aggregate, name, Ret);
     }
     else
     {
-        enum hasOwnStringToString = false;
+        enum hasOwn = false;
     }
-}
-
-public template hasOwnVoidToString(Aggregate, Super)
-if (is(Aggregate: Object))
-{
-    enum hasOwnVoidToString = hasOwnFunction!(Aggregate, Super, "toString", typeof(VoidToStringSample.toString));
-}
-
-public template hasOwnVoidToString(Aggregate)
-if (is(Aggregate == struct))
-{
-    static if (is(typeof(Aggregate.init.toString((void delegate(const(char)[])).init)) == void))
-    {
-        enum hasOwnVoidToString = !isFromAliasThis!(
-            Aggregate, "toString", typeof(VoidToStringSample.toString));
-    }
-    else
-    {
-        enum hasOwnVoidToString = false;
-    }
-}
-
-private final abstract class StringToStringSample
-{
-    override string toString();
-}
-
-private final abstract class VoidToStringSample
-{
-    void toString(scope void delegate(const(char)[]) sink);
 }
 
 public template isFromAliasThis(T, string member, Type)
