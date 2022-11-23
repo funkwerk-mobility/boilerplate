@@ -103,3 +103,21 @@ unittest
 
     cast(void) builder;
 }
+
+@("const sumtype with non-const subtype")
+unittest
+{
+    import std.sumtype : SumType;
+
+    struct Foo
+    {
+        int[] array;
+    }
+
+    struct Bar
+    {
+        const SumType!Foo foo;
+
+        mixin(GenerateAll);
+    }
+}

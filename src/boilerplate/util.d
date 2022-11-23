@@ -364,7 +364,7 @@ JSONValue toJsonValue(T)(T value)
     }
     else static if (is(T : SumType!U, U...))
     {
-        return value.match!(staticMap!(toJsonValue, U));
+        return value.match!(staticMap!(toJsonValue, staticMap!(ApplyLeft!(CopyConstness, T), U)));
     }
     else
     {
