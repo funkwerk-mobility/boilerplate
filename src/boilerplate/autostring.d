@@ -606,37 +606,40 @@ unittest
     Struct.init.to!string.shouldEqual("Struct()");
 }
 
-@("prints hashmaps in deterministic order")
-unittest
+version (DigitalMars)
 {
-    struct Struct
+    @("prints hashmaps in deterministic order")
+    unittest
     {
-        string[string] map;
-
-        mixin(GenerateToString);
-    }
-
-    bool foundCollision = false;
-
-    foreach (key1; ["opstop", "opsto"])
-    {
-        enum key2 = "foo"; // collide
-
-        const first = Struct([key1: null, key2: null]);
-        string[string] backwardsHashmap;
-
-        backwardsHashmap[key2] = null;
-        backwardsHashmap[key1] = null;
-
-        const second = Struct(backwardsHashmap);
-
-        if (first.map.keys != second.map.keys)
+        struct Struct
         {
-            foundCollision = true;
-            first.to!string.shouldEqual(second.to!string);
+            string[string] map;
+
+            mixin(GenerateToString);
         }
+
+        bool foundCollision = false;
+
+        foreach (key1; ["opstop", "opsto"])
+        {
+            enum key2 = "foo"; // collide
+
+            const first = Struct([key1: null, key2: null]);
+            string[string] backwardsHashmap;
+
+            backwardsHashmap[key2] = null;
+            backwardsHashmap[key1] = null;
+
+            const second = Struct(backwardsHashmap);
+
+            if (first.map.keys != second.map.keys)
+            {
+                foundCollision = true;
+                first.to!string.shouldEqual(second.to!string);
+            }
+        }
+        assert(foundCollision, "none of the listed keys caused a hash collision");
     }
-    assert(foundCollision, "none of the listed keys caused a hash collision");
 }
 
 @("applies custom formatters to types in hashmaps")
