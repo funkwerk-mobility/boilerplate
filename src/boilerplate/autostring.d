@@ -840,6 +840,26 @@ unittest
     Outer().to!string.shouldEqual("Outer(Inner())");
 }
 
+@("class with alias to struct")
+unittest
+{
+    struct A
+    {
+        mixin(GenerateToString);
+    }
+
+    class B
+    {
+        A a;
+
+        alias a this;
+
+        mixin(GenerateToString);
+    }
+
+    (new B).to!string.shouldEqual("B(A())");
+}
+
 mixin template GenerateToStringTemplate()
 {
     // this is a separate function to reduce the
@@ -1588,7 +1608,14 @@ if (__traits(hasMember, Aggregate, name))
     alias MatchingFunctions = Filter!(FunctionMatchesType, MyFunctions);
     enum hasFunction = MatchingFunctions.length == 1;
 
-    alias SuperFunctions = AliasSeq!(__traits(getOverloads, Super, name));
+    static if (__traits(hasMember, Super, name))
+    {
+        alias SuperFunctions = AliasSeq!(__traits(getOverloads, Super, name));
+    }
+    else
+    {
+        alias SuperFunctions = AliasSeq!();
+    }
     alias SuperMatchingFunctions = Filter!(FunctionMatchesType, SuperFunctions);
     enum superHasFunction = SuperMatchingFunctions.length == 1;
 
