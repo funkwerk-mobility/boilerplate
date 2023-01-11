@@ -10,6 +10,15 @@ public import boilerplate.constructor;
 
 enum GenerateAll = GenerateThis ~ GenerateToString ~ GenerateFieldAccessors ~ GenerateInvariants;
 
+/**
+ * Used to indicate that a field should be treated as if aliased to this as much as practical.
+ * At the moment this has no effect in boilerplate, but it is used in serialized to treat the
+ * field as aliased to this for purpose of encode/decode.
+ */
+struct AliasThis
+{
+}
+
 @("can use all four generators at once")
 unittest
 {
