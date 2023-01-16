@@ -344,7 +344,18 @@ JSONValue toJsonValue(T)(T value)
 
     static if (is(T : long) || is(T : double) || is(T : string))
     {
-        return JSONValue(value);
+        static if (is(T : long))
+        {
+            return JSONValue(cast(long) value);
+        }
+        else static if (is(T : double))
+        {
+            return JSONValue(cast(double) value);
+        }
+        else static if (is(T : string))
+        {
+            return JSONValue(cast(string) value);
+        }
     }
     else static if (__traits(hasMember, T, "toISOExtString"))
     {
