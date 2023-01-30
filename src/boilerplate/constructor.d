@@ -1232,7 +1232,6 @@ unittest
 @("builder supports implicit nullable conversion")
 unittest
 {
-    import std.datetime : SysTime;
     import std.typecons : Nullable, nullable;
 
     immutable struct Struct
@@ -1246,6 +1245,38 @@ unittest
     immutable int i;
 
     builder.a = i.nullable;
+}
+
+@("struct constructor with type substitution")
+unittest
+{
+    import std.typecons : Nullable, nullable;
+
+    immutable struct Struct
+    {
+        @(This.As!int)
+        Nullable!int a;
+
+        mixin(GenerateThis);
+    }
+
+    Struct(5).a.shouldEqual(Nullable!int(5));
+}
+
+@("class constructor with type substitution")
+unittest
+{
+    import std.typecons : Nullable, nullable;
+
+    class Class
+    {
+        @(This.As!int)
+        Nullable!int a;
+
+        mixin(GenerateThis);
+    }
+
+    (new Class(5)).a.shouldEqual(Nullable!int(5));
 }
 
 import std.string : format;
@@ -1265,14 +1296,16 @@ mixin template GenerateThisTemplate()
             optionallyRemoveTrailingUnderline,
             removeTrailingUnderline, reorder, udaIndex;
         import std.algorithm : all, canFind, filter, map;
+        import std.conv : to;
         import std.meta : Alias, aliasSeqOf, staticMap;
         import std.range : array, drop, empty, iota, zip;
         import std.string : endsWith, format, join;
+        import std.traits : getUDAs;
         import std.typecons : Nullable;
 
         mixin GenNormalMemberTuple;
 
-        string result = null;
+        string result = `import std.traits : getUDAs;`;
 
         string visibility = "public";
 
@@ -1336,20 +1369,29 @@ mixin template GenerateThisTemplate()
         foreach (i; aliasSeqOf!(members.length.iota))
         {
             enum member = members[i];
+            alias attributes = __traits(getAttributes, __traits(getMember, typeof(this), member));
 
             static if (i < argsPassedToSuper)
             {
                 enum bool useDefault = __traits(getMember, typeof(super).ConstructorInfo.FieldInfo, member).useDefault;
                 enum string memberTypeAsString = "typeof(super).ConstructorInfo.FieldInfo." ~ member ~ ".Type";
                 enum string default_ = "typeof(super).ConstructorInfo.FieldInfo." ~ member ~ ".fieldDefault";
-                enum string attributes = "typeof(super).ConstructorInfo.FieldInfo." ~ member ~ ".attributes";
+                enum string attributesStr = "typeof(super).ConstructorInfo.FieldInfo." ~ member ~ ".attributes";
             }
             else
             {
-                enum bool useDefault = udaIndex!(This.Default, __traits(getAttributes, __traits(getMember, typeof(this), member))) != -1;
-                enum string memberTypeAsString = "typeof(this." ~ member ~ ")";
-                enum string default_ = "getUDADefaultOrNothing!(typeof(this." ~ member ~ "), __traits(getAttributes, this." ~ member ~ "))";
-                enum string attributes = "__traits(getAttributes, this." ~ member ~ ")";
+                static if (udaIndex!(This.As, attributes) != -1)
+                {
+                    enum string memberTypeAsString = "getUDAs!(this." ~ member ~ ", This.As)[0].Type";
+                }
+                else
+                {
+                    enum string memberTypeAsString = "typeof(this." ~ member ~ ")";
+                }
+                enum bool useDefault = udaIndex!(This.Default, attributes) != -1;
+                enum string default_ = "getUDADefaultOrNothing!(typeof(this." ~ member ~ "),"
+                    ~ " __traits(getAttributes, this." ~ member ~ "))";
+                enum string attributesStr = "__traits(getAttributes, this." ~ member ~ ")";
             }
 
             mixin(`alias Type = ` ~ memberTypeAsString ~ `;`);
@@ -1466,7 +1508,7 @@ mixin template GenerateThisTemplate()
             argexprs ~= argexpr;
             fieldUseDefault ~= useDefault;
             fieldDefault ~= default_;
-            fieldAttributes ~= attributes;
+            fieldAttributes ~= attributesStr;
             defaultAssignments ~= useDefault ? (` = ` ~ default_) : ``;
             types ~= passExprAsConst ? (`const ` ~ memberTypeAsString) : memberTypeAsString;
         }
@@ -1660,6 +1702,11 @@ struct This
         {
             alias value = Alias;
         }
+    }
+
+    static struct As(Type_)
+    {
+        alias Type = Type_;
     }
 }
 
