@@ -618,15 +618,15 @@ public struct Optional(T)
 
     public U opAssign(U)(U value)
     {
-        static if (is(U : Nullable!Arg, Arg))
+        static if (is(U : Nullable!UArg, UArg))
         {
             import std.traits : Unqual;
 
-            // fixup Nullable!(const T) -> Nullable!T
-            // Nullable!(const T) is a type that should not ever have been allowed to exist.
-            static if (is(T == Nullable!(Unqual!Arg)))
+            // fixup Nullable!(mutable/const/immutable UArg) -> Nullable!(mutable/const/immutable TArg)
+            // Nullable!(const/immutable T) is a type that should not ever have been allowed to exist anyways.
+            static if (is(T == Nullable!TArg, TArg))
             {
-                static assert(is(Arg: Unqual!Arg), "Cannot assign Nullable!" ~ Arg.stringof ~ " to " ~ T.stringof);
+                static assert(is(UArg: TArg), "Cannot assign Nullable!" ~ UArg.stringof ~ " to " ~ T.stringof);
                 if (value.isNull)
                 {
                     _assign(T());

@@ -1229,6 +1229,25 @@ unittest
     builder.value.shouldEqual(Struct2([Struct1([1]), Struct1([2])]));
 }
 
+@("builder supports implicit nullable conversion")
+unittest
+{
+    import std.datetime : SysTime;
+    import std.typecons : Nullable, nullable;
+
+    immutable struct Struct
+    {
+        Nullable!int a;
+
+        mixin(GenerateThis);
+    }
+
+    auto builder = Struct.Builder();
+    immutable int i;
+
+    builder.a = i.nullable;
+}
+
 import std.string : format;
 
 mixin template GenerateThisTemplate()
