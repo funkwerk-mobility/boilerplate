@@ -130,3 +130,16 @@ unittest
         mixin(GenerateAll);
     }
 }
+
+@("struct with overloaded method")
+unittest
+{
+    struct Foo
+    {
+        void foo(int) { }
+
+        void foo(float) { }
+
+        mixin(GenerateAll);
+    }
+}

@@ -902,7 +902,16 @@ mixin template GenerateToStringTemplate()
 
         foreach (member; NormalMemberTuple)
         {
-            enum error = checkAttributeConsistency!(__traits(getAttributes, __traits(getMember, typeof(this), member)));
+            alias overloads = __traits(getOverloads, typeof(this), member, true);
+            static if (overloads.length > 0)
+            {
+                alias symbol = overloads[0];
+            }
+            else
+            {
+                mixin("alias symbol = typeof(this)." ~ member ~ ";");
+            }
+            enum error = checkAttributeConsistency!(__traits(getAttributes, symbol));
 
             static if (error)
             {
@@ -1097,8 +1106,15 @@ mixin template GenerateToStringTemplate()
 
             foreach (member; NormalMemberTuple)
             {
-                mixin("alias symbol = typeof(this)." ~ member ~ ";");
-
+                alias overloads = __traits(getOverloads, typeof(this), member, true);
+                static if (overloads.length > 0)
+                {
+                    alias symbol = overloads[0];
+                }
+                else
+                {
+                    mixin("alias symbol = typeof(this)." ~ member ~ ";");
+                }
                 enum udaInclude = udaIndex!(ToString.Include, __traits(getAttributes, symbol)) != -1;
                 enum udaExclude = udaIndex!(ToString.Exclude, __traits(getAttributes, symbol)) != -1;
                 enum udaLabeled = udaIndex!(ToString.Labeled, __traits(getAttributes, symbol)) != -1;
