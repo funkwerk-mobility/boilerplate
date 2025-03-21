@@ -1648,10 +1648,10 @@ public template saveConstructorInfo(string[] fields_, Fields...)
 
     public enum fields = fields_;
 
-    private template FieldInfo_() {
+    private template FieldInfo_(alias __format = format) {
         static foreach (i, field; fields)
         {
-            mixin(format!q{public alias %s = Fields[%s];}(field, i));
+            mixin(__format!q{public alias %s = Fields[%s];}(field, i));
         }
     }
 
@@ -1883,6 +1883,21 @@ unittest
     {
         pure:
         @safe:
+
+        int i;
+
+        mixin(GenerateThis);
+    }
+}
+
+@("class with format member")
+unittest
+{
+    import std.typecons : Nullable;
+
+    class Foo
+    {
+        string format;
 
         int i;
 
