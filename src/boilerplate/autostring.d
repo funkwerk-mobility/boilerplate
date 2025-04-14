@@ -402,7 +402,7 @@ unittest
     Struct strct;
     strct.time = SysTime.fromISOExtString("2003-02-01T11:55:00Z");
 
-    // see unittest/config/string.d
+    // see src/toString/datetime.d
     strct.to!string.shouldEqual("Struct(2003-02-01T11:55:00Z)");
 }
 
@@ -583,7 +583,7 @@ unittest
     Struct.init.to!string.shouldEqual("Struct(ni=no)");
 }
 
-// see unittest.config.string
+// see src/boilerplate/toString/bitflags.d
 @("supports optional BitFlags in structs")
 unittest
 {
