@@ -9,6 +9,8 @@ import std.datetime;
  */
 void toString(Writer)(scope ref Writer writer, SysTime time)
 {
+    // round to milliseconds
+    time.fracSecs = time.fracSecs.total!"msecs".dur!"msecs";
     time.toISOExtString(writer);
 }
 
@@ -104,6 +106,7 @@ in (0 <= millis && millis < 1000)
     import unit_threaded.should : shouldEqual;
 
     SysTime.fromISOExtString("2003-02-01T11:55:00Z").testToString.shouldEqual("2003-02-01T11:55:00Z");
+    SysTime.fromISOExtString("2003-02-01T11:55:00.123456Z").testToString.shouldEqual("2003-02-01T11:55:00.123Z");
     Date.fromISOExtString("2003-02-01").testToString.shouldEqual("2003-02-01");
     TimeOfDay.fromISOExtString("01:02:03").testToString.shouldEqual("01:02:03");
 }
