@@ -20,8 +20,8 @@
 			"dependencies": {
 				"unit-threaded": "*"
 			},
-			"sourcePaths": ["src", "unittest"],
-			"importPaths": ["src", "unittest"]
+			"sourcePaths": ["src"],
+			"importPaths": ["src"]
 		}
 	]
 }

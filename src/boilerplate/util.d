@@ -1,5 +1,7 @@
 module boilerplate.util;
 
+import boilerplate.toString.bitflags : customToString = toString;
+import boilerplate.toString.datetime : customToString = toString;
 import std.algorithm : map, sort;
 import std.format;
 import std.json;
@@ -7,18 +9,6 @@ import std.meta;
 import std.range : array, iota;
 import std.string : join;
 import std.traits;
-
-static if (__traits(compiles, { import config.string : toString; }))
-{
-    import config.string : customToString = toString;
-}
-else
-{
-    private void customToString(T)()
-    if (false)
-    {
-    }
-}
 
 enum needToDup(T) = (isArray!T || isAssociativeArray!T) && !DeepConst!T;
 
@@ -416,7 +406,7 @@ private auto wrapFormatType(T)(T value, bool escapeStrings)
         }
         return NullableWrapper(value, escapeStrings);
     }
-    else static if (__traits(compiles, customToString(value, (void delegate(const(char)[])).init)))
+    else static if (__traits(compiles, { auto callback = (const(char)[] arg) {}; customToString(callback, value); }))
     {
         static struct CustomToStringWrapper
         {
@@ -424,7 +414,7 @@ private auto wrapFormatType(T)(T value, bool escapeStrings)
 
             void toString(scope void delegate(const(char)[]) sink) const
             {
-                customToString(this.value, sink);
+                customToString(sink, this.value);
             }
         }
         return CustomToStringWrapper(value);

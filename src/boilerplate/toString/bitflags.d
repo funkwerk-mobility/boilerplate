@@ -2,15 +2,15 @@ module boilerplate.toString.bitflags;
 
 import std.typecons : BitFlags;
 
-void toString(T: const BitFlags!Enum, Enum)(const T field, scope void delegate(const(char)[]) sink)
+void toString(T: const BitFlags!Enum, Enum, Writer)(ref Writer writer, const T field)
 {
     import std.conv : to;
     import std.traits : EnumMembers;
 
     bool firstMember = true;
 
-    sink(Enum.stringof);
-    sink("(");
+    writer(Enum.stringof);
+    writer("(");
 
     static foreach (member; EnumMembers!Enum)
     {
@@ -22,15 +22,15 @@ void toString(T: const BitFlags!Enum, Enum)(const T field, scope void delegate(c
             }
             else
             {
-                sink(", ");
+                writer(", ");
             }
 
             enum name = to!string(member);
 
-            sink(name);
+            writer(name);
         }
     }
-    sink(")");
+    writer(")");
 }
 
 @("can format bitflags")
@@ -52,7 +52,7 @@ unittest
 
     const BitFlags!Enum flags = BitFlags!Enum(Enum.A, Enum.B);
 
-    toString(flags, sink);
+    toString(sink, flags);
 
     generatedString.shouldEqual("Enum(A, B)");
 }
