@@ -1290,11 +1290,11 @@ mixin template GenerateThisTemplate()
             return null;
         }
 
-        import boilerplate.constructor : filterCanFind, mapFormat, This;
+        import boilerplate.constructor : filterCanFind, This;
         import boilerplate.util :
             bucketSort, GenNormalMemberTuple, needToDup,
             optionallyRemoveTrailingUnderline,
-            removeTrailingUnderline, reorder, udaIndex;
+            removeTrailingUnderline, udaIndex;
         import std.algorithm : all, canFind, filter, map;
         import std.conv : to;
         import std.meta : Alias, aliasSeqOf, staticMap;
@@ -1494,8 +1494,8 @@ mixin template GenerateThisTemplate()
 
                 static if (isNullable)
                 {
-                    argexpr = format!`%s.isNull ? %s.init : %s(%s.get.dup)`
-                        (argexpr, memberTypeAsString, memberTypeAsString, argexpr);
+                    argexpr = argexpr ~ ".isNull ? " ~ memberTypeAsString ~ ".init"
+                        ~ " : " ~ memberTypeAsString ~ "(" ~ argexpr ~ ".get.dup)";
                 }
                 else
                 {
@@ -1525,21 +1525,30 @@ mixin template GenerateThisTemplate()
         assert(fields.length == types.length);
         assert(fields.length == fieldUseDefault.length);
         assert(fields.length == fieldDefault.length);
+        assert(fields.length == fieldAttributes.length);
 
-        result ~= format!`
-            public static alias ConstructorInfo =
-                saveConstructorInfo!(%s, %-(%s, %));`
-        (
-            fields.reorder(constructorFieldOrder),
-            zip(
-                types.reorder(constructorFieldOrder),
-                fieldUseDefault.reorder(constructorFieldOrder),
-                fieldDefault.reorder(constructorFieldOrder),
-                fieldAttributes.reorder(constructorFieldOrder),
-            )
-            .map!(q{format!`ConstructorField!(%s, %s, %s, %s)`(a[0], a[1], a[2], a[3])})
-            .array
-        );
+        result ~= "public static alias ConstructorInfo = saveConstructorInfo!([";
+        foreach (index, pos; constructorFieldOrder)
+        {
+            if (index > 0)
+            {
+                result ~= ", ";
+            }
+            result ~= "\"" ~ fields[pos] ~ "\"";
+        }
+        result ~= "], ";
+        foreach (index, pos; constructorFieldOrder)
+        {
+            if (index > 0)
+            {
+                result ~= ", ";
+            }
+            result ~= "ConstructorField!(" ~ types[pos] ~ ", "
+                ~ (fieldUseDefault[pos] ? "true" : "false") ~ ", "
+                ~ fieldDefault[pos] ~ ", "
+                ~ fieldAttributes[pos] ~ ")";
+        }
+        result ~= ");\n\n\n";
 
         // don't emit this(a = b, c = d) for structs -
         // the compiler complains that it collides with this(), which is reserved.
@@ -1561,9 +1570,25 @@ mixin template GenerateThisTemplate()
         }
         else
         {
-            result ~= visibility ~ ` this(`
-                ~ constructorFieldOrder.mapFormat!`%s %s%s`(types, args, defaultAssignments).join(`, `)
-                ~ format!`) %-(%s %)`(constructorAttributes);
+            result ~= visibility ~ ` this(`;
+
+            foreach (index, pos; constructorFieldOrder)
+            {
+                if (index > 0)
+                {
+                    result ~= ", ";
+                }
+                result ~= types[pos] ~ " " ~ args[pos] ~ defaultAssignments[pos];
+            }
+            result ~= `) `;
+            foreach (index, attrib; constructorAttributes)
+            {
+                if (index > 0)
+                {
+                    result ~= " ";
+                }
+                result ~= attrib;
+            }
 
             result ~= `{`;
 
@@ -1572,19 +1597,22 @@ mixin template GenerateThisTemplate()
                 result ~= `super(` ~ args[0 .. argsPassedToSuper].join(", ") ~ `);`;
             }
 
-            result ~= fields.length.iota.drop(argsPassedToSuper).mapFormat!`this.%s = %s;`(fields, argexprs).join;
+            foreach (pos; argsPassedToSuper .. fields.length)
+            {
+                result ~= "this." ~ fields[pos] ~ " = " ~ argexprs[pos] ~ ";";
+            }
 
             foreach (i, field; directInitFields)
             {
                 if (directInitUseSelf[i])
                 {
-                    result ~= format!`this.%s = __traits(getAttributes, this.%s)[%s].value(this);`
-                        (field, field, directInitIndex[i]);
+                    result ~= "this." ~ field ~ " = __traits(getAttributes, this." ~ field ~ ")"
+                        ~ "[" ~ directInitIndex[i].to!string ~ "].value(this);";
                 }
                 else
                 {
-                    result ~= format!`this.%s = __traits(getAttributes, this.%s)[%s].value;`
-                        (field, field, directInitIndex[i]);
+                    result ~= "this." ~ field ~ " = __traits(getAttributes, this." ~ field ~ ")"
+                        ~ "[" ~ directInitIndex[i].to!string ~ "].value;";
                 }
             }
 
@@ -1911,18 +1939,4 @@ public string[] filterCanFind(string[] array, string[] other) nothrow pure @safe
     import std.algorithm : canFind, filter;
 
     return array.filter!(a => other.canFind(a)).array;
-}
-
-// ditto
-public string[] mapFormat(string fmt, Range, T...)(Range range, T args)
-{
-    import std.algorithm : map;
-    import std.format : format;
-    import std.range : iota, join;
-
-    enum argElements = T.length.iota.map!(k => format!"args[%s][i]"(k)).join(", ");
-
-    return range.map!((i) {
-        return mixin("format!fmt(" ~ argElements ~ ")");
-    }).array;
 }

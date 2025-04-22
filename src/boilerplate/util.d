@@ -557,24 +557,6 @@ unittest
         .shouldEqual("Hello 5 World 35!");
 }
 
-public T[] reorder(T)(T[] source, size_t[] newOrder)
-// newOrder must be a permutation of source indices
-in (newOrder.dup.sort.array == source.length.iota.array)
-{
-    import std.algorithm : map;
-    import std.range : array;
-
-    return newOrder.map!(i => source[i]).array;
-}
-
-@("reorder returns reordered array")
-unittest
-{
-    import unit_threaded.should : shouldEqual;
-
-    [1, 2, 3].reorder([0, 2, 1]).shouldEqual([1, 3, 2]);
-}
-
 public struct Optional(T)
 {
     import std.typecons : Nullable;

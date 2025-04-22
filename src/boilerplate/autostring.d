@@ -933,6 +933,7 @@ mixin template GenerateToStringTemplate()
             hasOwnStringToString, hasOwnVoidToString, isMemberUnlabeledByDefault, ToString, typeName;
         import boilerplate.conditions : NonEmpty;
         import boilerplate.util : GenNormalMemberTuple, udaIndex;
+        import std.conv : to;
         import std.json : JSONValue;
         import std.meta : Alias;
         import std.string : endsWith, format, split, startsWith, strip;
@@ -997,13 +998,6 @@ mixin template GenerateToStringTemplate()
                 }
             }
 
-            string NamePlusOpenParen = typeName!(typeof(this)) ~ "(";
-
-            version(AutoStringDebug)
-            {
-                toStringFunction ~= format!`pragma(msg, "%s %s");`(alreadyHaveStringToString, alreadyHaveVoidToString);
-            }
-
             static if (isObject
                 && is(typeof(typeof(super).init.toString((void delegate(const(char)[])).init)) == void))
             {
@@ -1030,7 +1024,7 @@ mixin template GenerateToStringTemplate()
 
             if (!nakedMode)
             {
-                toStringFunction ~= format!`sink(%(%s%));`([NamePlusOpenParen]);
+                toStringFunction ~= `sink(q{` ~ typeName!(typeof(this)) ~ `} ~ "(");`;
             }
 
             bool includeSuperToString = false;
@@ -1206,21 +1200,18 @@ mixin template GenerateToStringTemplate()
                             alias pred = Alias!(__traits(getAttributes, symbol)[optionalIndex]).condition;
                             static if (__traits(compiles, pred(typeof(this).init)))
                             {
-                                conditionalWritestmt = format!q{
-                                    if (__traits(getAttributes, %s)[%s].condition(this)) { %%s }
-                                } (membervalue, optionalIndex);
+                                conditionalWritestmt = `if (__traits(getAttributes, ` ~ membervalue ~ `)`
+                                    ~ `[` ~ optionalIndex.to!string ~ `].condition(this)) { %s }`;
                             }
                             else
                             {
-                                conditionalWritestmt = format!q{
-                                    if (__traits(getAttributes, %s)[%s].condition(%s)) { %%s }
-                                } (membervalue, optionalIndex, membervalue);
+                                conditionalWritestmt = `if (__traits(getAttributes, ` ~ membervalue ~ `)`
+                                    ~ `[` ~ optionalIndex.to!string ~ `].condition(` ~ membervalue ~ `)) { %s }`;
                             }
                         }
                         else static if (__traits(compiles, typeof(symbol).init.isNull))
                         {
-                            conditionalWritestmt = format!q{if (!%s.isNull) { %%s }}
-                                (membervalue);
+                            conditionalWritestmt = `if (!` ~ membervalue ~ `.isNull) { %s }`;
 
                             static if (is(typeof(symbol) : Nullable!T, T))
                             {
@@ -1230,29 +1221,24 @@ mixin template GenerateToStringTemplate()
                         }
                         else static if (__traits(compiles, typeof(symbol).init.empty))
                         {
-                            conditionalWritestmt = format!q{import std.array : empty; if (!%s.empty) { %%s }}
-                                (membervalue);
+                            conditionalWritestmt = `import std.array : empty; if (!` ~ membervalue ~ `.empty) { %s }`;
                         }
                         else static if (__traits(compiles, typeof(symbol).init !is null))
                         {
-                            conditionalWritestmt = format!q{if (%s !is null) { %%s }}
-                                (membervalue);
+                            conditionalWritestmt = `if (` ~ membervalue ~ ` !is null) { %s }`;
                         }
                         else static if (__traits(compiles, typeof(symbol).init != 0))
                         {
-                            conditionalWritestmt = format!q{if (%s != 0) { %%s }}
-                                (membervalue);
+                            conditionalWritestmt = `if (` ~ membervalue ~ ` != 0) { %s }`;
                         }
                         else static if (__traits(compiles, { if (typeof(symbol).init) { } }))
                         {
-                            conditionalWritestmt = format!q{if (%s) { %%s }}
-                                (membervalue);
+                            conditionalWritestmt = `if (` ~ membervalue ~ `) { %s }`;
                         }
                         else
                         {
-                            return format!(`static assert(false, `
-                                    ~ `"don't know how to figure out whether %s is present.");`)
-                                (member);
+                            return `static assert(false, `
+                                ~ `"don't know how to figure out whether ` ~ member ~ ` is present.");`;
                         }
                     }
                     else
@@ -1261,8 +1247,7 @@ mixin template GenerateToStringTemplate()
                         static if (!udaToStringHandler && !udaInclude &&
                             __traits(compiles, typeof(symbol).init.isNull))
                         {
-                            conditionalWritestmt = format!q{if (!%s.isNull) { %%s }}
-                                (membervalue);
+                            conditionalWritestmt = `if (!` ~ membervalue ~ `.isNull) { %s }`;
 
                             static if (is(typeof(symbol) : Nullable!T, T))
                             {
@@ -1280,16 +1265,16 @@ mixin template GenerateToStringTemplate()
 
                     if (labeled)
                     {
-                        writeStmt = format!`sink.sinkWrite(comma, %s, "%s=%%s", %s);`
-                            (escapeStrings, memberName, readMemberValue);
+                        writeStmt = `sink.sinkWrite(comma, ` ~ escapeStrings.to!string
+                            ~ `, "` ~ memberName ~ `=%s", `
+                            ~ readMemberValue ~ `);`;
                     }
                     else
                     {
-                        writeStmt = format!`sink.sinkWrite(comma, %s, "%%s", %s);`
-                            (escapeStrings, readMemberValue);
+                        writeStmt = `sink.sinkWrite(comma, ` ~ escapeStrings.to!string
+                            ~ `, "%s", ` ~ readMemberValue ~ `);`;
                     }
-                    string writeJsonStmt = format!`result["%s"] = toJsonValue(%s);`
-                        (memberName, jsonMemberValue);
+                    string writeJsonStmt = `result["` ~ memberName ~ `"] = toJsonValue(` ~ jsonMemberValue ~ `);`;
 
                     toStringFunction ~= format(conditionalWritestmt, writeStmt);
                     toJsonFunction ~= format(conditionalWritestmt, writeJsonStmt);
@@ -1511,7 +1496,7 @@ public bool isMemberUnlabeledByDefault(Type)(string field, bool attribNonEmpty)
 
     return field == Type.stringof.toLower
         || (field == "time" && is(Type == SysTime))
-        || (field == "id" && is(typeof(Type.toString)));
+        || (field == "id" && __traits(hasMember, Type, "toString"));
 }
 
 private string toLower(string text)
