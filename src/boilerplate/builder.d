@@ -356,9 +356,8 @@ public struct BuilderProxy(T)
     {
         static if (is(T == E[], E))
         {
-            int i = 0;
-
-            assert(i != 0); // assert(false) but return stays "reachable"
+            // you should be using _arrayValue!
+            assert(false);
             return E.Builder();
         }
         else
@@ -372,9 +371,8 @@ public struct BuilderProxy(T)
     {
         static if (is(T == E[], E))
         {
-            int i = 0;
-
-            assert(i != 0); // assert(false) but return stays "reachable"
+            // you should be using _arrayValue!
+            assert(false);
             return E.Builder();
         }
         else static if (isNullable)
