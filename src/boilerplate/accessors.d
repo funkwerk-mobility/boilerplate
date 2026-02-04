@@ -31,7 +31,7 @@ struct Write
 }
 
 immutable string GenerateFieldAccessors = `
-    import boilerplate.accessors : GenerateFieldAccessorMethods;
+    import boilerplate.accessors : aaDup, GenerateFieldAccessorMethods;
     mixin GenerateFieldAccessorMethods;
     mixin(GenerateFieldAccessorMethodsImpl);
     `;
@@ -216,7 +216,7 @@ string GenerateReader(T, Attributes...)(string name, bool fieldIsStatic, bool fi
         }
         else static if (isAssociativeArray!T)
         {
-            accessorBody = format!`return cast(typeof(this.%s)) this.%s.dup;`(name, name);
+            accessorBody = format!`return cast(typeof(this.%s)) this.%s.aaDup;`(name, name);
         }
         else
         {
@@ -555,6 +555,11 @@ private string accessor(string name) @nogc nothrow pure @safe
     import std.string : chomp, chompPrefix;
 
     return name.chomp("_").chompPrefix("_");
+}
+
+public auto aaDup(K, V)(const V[K] aa)
+{
+    return aa.dup;
 }
 
 @("removes underlines from names")
@@ -1156,7 +1161,11 @@ unittest
     thing.value = value;
 
     // overwrite return value of @Read
-    thing.value[2] = 4;
+    // thing.value[2] = 4;
+    // note: dmd doesn't let you do this anymore but the below is semantically equivalent
+    auto array = thing.value;
+
+    array[2] = 4;
     // overwrite source value of @Write
     value[2] = 4;
 
