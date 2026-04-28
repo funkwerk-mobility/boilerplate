@@ -208,7 +208,10 @@ public mixin template BuilderImpl(T, Info = Info, alias BuilderProxy = BuilderPr
         }
         else
         {
-            return mixin(std.format.format!q{T(%-(%s, %))}(getArgArray));
+            auto value = mixin(std.format.format!q{T(%-(%s, %))}(getArgArray));
+
+            assert(&value);
+            return value;
         }
     }
 

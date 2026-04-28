@@ -1801,6 +1801,28 @@ unittest
     auto bar = Bar(array);
 }
 
+@("struct with only default fields still checks invariant in constructor")
+unittest
+{
+    import core.exception : AssertError;
+    import std.typecons : Nullable;
+
+    static struct Foo
+    {
+        @(This.Default)
+        Nullable!int field;
+
+        invariant (this.field.isNull);
+
+        mixin(GenerateThis);
+    }
+
+    auto builder = Foo.Builder();
+
+    builder.field = 3;
+    builder.builderValue.shouldThrow!AssertError;
+}
+
 @("very large types can be used")
 unittest
 {
